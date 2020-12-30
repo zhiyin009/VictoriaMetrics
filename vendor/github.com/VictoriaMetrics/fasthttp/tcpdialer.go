@@ -230,28 +230,29 @@ func tryDial(network string, addr *net.TCPAddr, deadline time.Time, concurrencyC
 		chv = make(chan dialResult, 1)
 	}
 	ch := chv.(chan dialResult)
-	go func() {
+	go func(timeout time.Duration) {
 		var dr dialResult
-		dr.conn, dr.err = net.DialTCP(network, nil, addr)
+		dr.conn, dr.err = net.DialTimeout(network, addr.String(), timeout)
+		if netErr, ok := dr.err.(net.Error); ok {
+			if netErr.Timeout() {
+			dr.err = ErrDialTimeout
+			}
+		}
 		ch <- dr
 		<-concurrencyCh
-	}()
+	}(timeout)
 
 	var (
 		conn net.Conn
 		err  error
 	)
 
-	tc := acquireTimer(timeout)
 	select {
 	case dr := <-ch:
 		conn = dr.conn
 		err = dr.err
 		dialResultChanPool.Put(ch)
-	case <-tc.C:
-		err = ErrDialTimeout
 	}
-	releaseTimer(tc)
 
 	return conn, err
 }
